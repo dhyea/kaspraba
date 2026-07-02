@@ -121,9 +121,23 @@ async function init(){
       </div>`;
     return;
   }
-  await Promise.all([loadPeriodData(), loadEmergencyFund()]);
-  render();
-  setupRealtime();
+  try{
+    await Promise.all([loadPeriodData(), loadEmergencyFund()]);
+    render();
+    setupRealtime();
+  }catch(err){
+    console.error(err);
+    app.innerHTML = `
+      <div class="config-warning">
+        <b>Gagal memuat data dari Supabase.</b><br>
+        Pesan error: <code>${(err && err.message) || String(err)}</code><br><br>
+        Kemungkinan penyebab:<br>
+        • URL atau anon key di <code>config.js</code> salah/kepotong<br>
+        • Skrip <code>supabase_schema.sql</code> belum berhasil dijalankan di Supabase SQL Editor<br>
+        • Nama tabel tidak sesuai (income, categories, transactions, emergency_fund)<br><br>
+        Buka DevTools (F12) &gt; tab Console untuk detail lengkap, lalu kirim pesan errornya.
+      </div>`;
+  }
 }
 
 // ---------------- RENDER ----------------
