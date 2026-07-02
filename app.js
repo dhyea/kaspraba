@@ -6,11 +6,11 @@
 
 const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
-let supabase = null;
+let supabaseClient = null;
 let CONFIG_OK = false;
 try{
   if(SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('GANTI') && !SUPABASE_ANON_KEY.includes('GANTI')){
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     CONFIG_OK = true;
   }
 }catch(e){ console.error(e); }
@@ -48,34 +48,34 @@ function totalEmergencyFund(){ return STATE.emergencyFund.reduce((s,e)=>s+Number
 // ---------------- DATA LOADING ----------------
 async function loadPeriodData(){
   const [{data: income}, {data: categories}, {data: transactions}] = await Promise.all([
-    supabase.from('income').select('*').eq('period', currentPeriod).order('created_at'),
-    supabase.from('categories').select('*').eq('period', currentPeriod).order('created_at'),
-    supabase.from('transactions').select('*').eq('period', currentPeriod).order('tx_date', {ascending:false}),
+    supabaseClient.from('income').select('*').eq('period', currentPeriod).order('created_at'),
+    supabaseClient.from('categories').select('*').eq('period', currentPeriod).order('created_at'),
+    supabaseClient.from('transactions').select('*').eq('period', currentPeriod).order('tx_date', {ascending:false}),
   ]);
   STATE.income = income || [];
   STATE.categories = categories || [];
   STATE.transactions = transactions || [];
 }
 async function loadEmergencyFund(){
-  const {data} = await supabase.from('emergency_fund').select('*').order('ef_date', {ascending:false});
+  const {data} = await supabaseClient.from('emergency_fund').select('*').order('ef_date', {ascending:false});
   STATE.emergencyFund = data || [];
 }
 
 async function copyFromPreviousMonth(){
   const prev = shiftPeriod(currentPeriod, -1);
   const [{data: prevIncome}, {data: prevCategories}] = await Promise.all([
-    supabase.from('income').select('*').eq('period', prev),
-    supabase.from('categories').select('*').eq('period', prev),
+    supabaseClient.from('income').select('*').eq('period', prev),
+    supabaseClient.from('categories').select('*').eq('period', prev),
   ]);
   if((prevIncome||[]).length){
-    await supabase.from('income').insert(prevIncome.map(i=>({period: currentPeriod, label:i.label, amount:i.amount})));
+    await supabaseClient.from('income').insert(prevIncome.map(i=>({period: currentPeriod, label:i.label, amount:i.amount})));
   }
   if((prevCategories||[]).length){
-    await supabase.from('categories').insert(prevCategories.map(c=>({period: currentPeriod, name:c.name, budget:c.budget})));
+    await supabaseClient.from('categories').insert(prevCategories.map(c=>({period: currentPeriod, name:c.name, budget:c.budget})));
   }else{
     // default kategori kalau bulan sebelumnya juga kosong
     const defaults = ['Belanja Dapur/Sembako','Listrik, Air, Gas','Cicilan/Tagihan','Pendidikan Anak','Kesehatan','Transportasi','Hiburan/Lain-lain'];
-    await supabase.from('categories').insert(defaults.map(name=>({period: currentPeriod, name, budget:0})));
+    await supabaseClient.from('categories').insert(defaults.map(name=>({period: currentPeriod, name, budget:0})));
   }
   await loadPeriodData();
   render();
@@ -83,7 +83,7 @@ async function copyFromPreviousMonth(){
 
 // ---------------- REALTIME ----------------
 function setupRealtime(){
-  supabase.channel('kas-keluarga-changes')
+  supabaseClient.channel('kas-keluarga-changes')
     .on('postgres_changes', {event:'*', schema:'public', table:'income'}, handleChange)
     .on('postgres_changes', {event:'*', schema:'public', table:'categories'}, handleChange)
     .on('postgres_changes', {event:'*', schema:'public', table:'transactions'}, handleChange)
@@ -270,51 +270,51 @@ function renderAnggaran(){
       if(!newName){ e.target.value = oldName; return; }
       if(newName === oldName) return;
       const affected = STATE.transactions.filter(t=>t.category===oldName);
-      await Promise.all(affected.map(t=>supabase.from('transactions').update({category:newName}).eq('id', t.id)));
-      await supabase.from('categories').update({name:newName}).eq('id', cat.id);
+      await Promise.all(affected.map(t=>supabaseClient.from('transactions').update({category:newName}).eq('id', t.id)));
+      await supabaseClient.from('categories').update({name:newName}).eq('id', cat.id);
       await loadPeriodData(); render();
     });
   });
   panel.querySelectorAll('[data-budget-cat]').forEach(inp=>{
     inp.addEventListener('change', async e=>{
-      await supabase.from('categories').update({budget: Number(e.target.value)||0}).eq('id', e.target.dataset.budgetCat);
+      await supabaseClient.from('categories').update({budget: Number(e.target.value)||0}).eq('id', e.target.dataset.budgetCat);
       await loadPeriodData(); render();
     });
   });
   panel.querySelectorAll('[data-del-cat]').forEach(btn=>{
     btn.addEventListener('click', async e=>{
       if(!confirm('Hapus kategori ini? Transaksi yang sudah tercatat tidak akan terhapus.')) return;
-      await supabase.from('categories').delete().eq('id', e.target.dataset.delCat);
+      await supabaseClient.from('categories').delete().eq('id', e.target.dataset.delCat);
       await loadPeriodData(); render();
     });
   });
   document.getElementById('addCatBtn').addEventListener('click', async ()=>{
     const name = prompt('Nama kategori baru:');
     if(!name) return;
-    await supabase.from('categories').insert({period: currentPeriod, name, budget:0});
+    await supabaseClient.from('categories').insert({period: currentPeriod, name, budget:0});
     await loadPeriodData(); render();
   });
 
   panel.querySelectorAll('[data-income-label]').forEach(inp=>{
     inp.addEventListener('change', async e=>{
-      await supabase.from('income').update({label: e.target.value}).eq('id', e.target.dataset.incomeLabel);
+      await supabaseClient.from('income').update({label: e.target.value}).eq('id', e.target.dataset.incomeLabel);
       await loadPeriodData();
     });
   });
   panel.querySelectorAll('[data-income-amount]').forEach(inp=>{
     inp.addEventListener('change', async e=>{
-      await supabase.from('income').update({amount: Number(e.target.value)||0}).eq('id', e.target.dataset.incomeAmount);
+      await supabaseClient.from('income').update({amount: Number(e.target.value)||0}).eq('id', e.target.dataset.incomeAmount);
       await loadPeriodData(); render();
     });
   });
   panel.querySelectorAll('[data-del-income]').forEach(btn=>{
     btn.addEventListener('click', async e=>{
-      await supabase.from('income').delete().eq('id', e.target.dataset.delIncome);
+      await supabaseClient.from('income').delete().eq('id', e.target.dataset.delIncome);
       await loadPeriodData(); render();
     });
   });
   document.getElementById('addIncomeBtn').addEventListener('click', async ()=>{
-    await supabase.from('income').insert({period: currentPeriod, label:'Sumber baru', amount:0});
+    await supabaseClient.from('income').insert({period: currentPeriod, label:'Sumber baru', amount:0});
     await loadPeriodData(); render();
   });
 }
@@ -360,12 +360,12 @@ function renderTransaksi(){
     const amount = Number(document.getElementById('txAmount').value)||0;
     if(!category){ alert('Buat kategori dulu di tab Amplop Anggaran.'); return; }
     if(amount<=0){ alert('Isi jumlah pengeluaran terlebih dahulu.'); return; }
-    await supabase.from('transactions').insert({period: currentPeriod, tx_date:date, description, category, amount, by_user:USER_NAME});
+    await supabaseClient.from('transactions').insert({period: currentPeriod, tx_date:date, description, category, amount, by_user:USER_NAME});
     await loadPeriodData(); render(); activeTab='transaksi'; render();
   });
   panel.querySelectorAll('[data-del-tx]').forEach(btn=>{
     btn.addEventListener('click', async e=>{
-      await supabase.from('transactions').delete().eq('id', e.target.dataset.delTx);
+      await supabaseClient.from('transactions').delete().eq('id', e.target.dataset.delTx);
       await loadPeriodData(); render(); activeTab='transaksi'; render();
     });
   });
@@ -418,12 +418,12 @@ function renderDarurat(){
     const description = document.getElementById('efDesc').value.trim();
     const amount = Number(document.getElementById('efAmount').value)||0;
     if(amount<=0){ alert('Isi jumlah setoran terlebih dahulu.'); return; }
-    await supabase.from('emergency_fund').insert({ef_date:date, description, amount, by_user:USER_NAME});
+    await supabaseClient.from('emergency_fund').insert({ef_date:date, description, amount, by_user:USER_NAME});
     await loadEmergencyFund(); render(); activeTab='darurat'; render();
   });
   panel.querySelectorAll('[data-del-ef]').forEach(btn=>{
     btn.addEventListener('click', async e=>{
-      await supabase.from('emergency_fund').delete().eq('id', e.target.dataset.delEf);
+      await supabaseClient.from('emergency_fund').delete().eq('id', e.target.dataset.delEf);
       await loadEmergencyFund(); render(); activeTab='darurat'; render();
     });
   });
