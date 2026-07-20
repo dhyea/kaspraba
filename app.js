@@ -541,13 +541,22 @@ function renderRekap(){
   byCat.sort((a,b)=>b.spent-a.spent);
 
   const catRowsHtml = byCat.map(c=>{
-    const pct = spent>0 ? (c.spent/spent*100) : 0;
+    const pctOfTotal = spent>0 ? (c.spent/spent*100) : 0;
+    const hasBudget = c.budget>0;
+    const pctOfBudget = hasBudget ? (c.spent/c.budget*100) : null;
+    const sisa = c.budget - c.spent;
+    const over = hasBudget && sisa<0;
+    const sisaLabel = !hasBudget ? '-' : (over ? `Lebih ${formatRp(Math.abs(sisa))}` : `Sisa ${formatRp(sisa)}`);
+    const budgetPctLabel = hasBudget ? `${pctOfBudget.toFixed(1)}%` : '-';
     return `
       <tr>
         <td>${c.name}</td>
         <td class="amount">${formatRp(c.spent)}</td>
-        <td class="amount">${pct.toFixed(1)}%</td>
-        <td style="min-width:140px;"><div class="bar-track" style="margin:0;"><div class="bar-fill" style="width:${pct}%"></div></div></td>
+        <td class="amount">${hasBudget?formatRp(c.budget):'-'}</td>
+        <td class="amount">${budgetPctLabel}</td>
+        <td class="amount" style="color:${over?'var(--danger)':'var(--success)'}">${sisaLabel}</td>
+        <td class="amount">${pctOfTotal.toFixed(1)}%</td>
+        <td style="min-width:120px;"><div class="bar-track" style="margin:0;"><div class="bar-fill ${over?'over':''}" style="width:${Math.min(100,hasBudget?pctOfBudget:pctOfTotal)}%"></div></div></td>
       </tr>`;
   }).join('');
 
@@ -575,7 +584,15 @@ function renderRekap(){
 
     <h2 class="section-title">Per Kategori</h2>
     <table>
-      <thead><tr><th>Kategori</th><th style="text-align:right">Jumlah</th><th style="text-align:right">% dari Total</th><th>Proporsi</th></tr></thead>
+      <thead><tr>
+        <th>Kategori</th>
+        <th style="text-align:right">Terpakai</th>
+        <th style="text-align:right">Anggaran</th>
+        <th style="text-align:right">% Anggaran</th>
+        <th style="text-align:right">Sisa/Lebih</th>
+        <th style="text-align:right">% dari Total</th>
+        <th>Proporsi</th>
+      </tr></thead>
       <tbody>${catRowsHtml}</tbody>
     </table>
     ${byCat.length===0 ? '<div class="empty">Belum ada pengeluaran bulan ini.</div>' : ''}
