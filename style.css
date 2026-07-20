@@ -121,5 +121,12 @@ td.who{color:var(--ink-soft);font-size:12px;}
 .ef-bar-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:999px;transition:width .4s;}
 .ef-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-soft);}
 
+.row-actions{display:flex;gap:6px;justify-content:flex-end;}
+.edit-input{width:100%;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:'Inter',sans-serif;font-size:12px;background:var(--bg);}
+.edit-input.amount-input{font-family:'IBM Plex Mono',monospace;text-align:right;}
+tr.editing-row td{background:var(--accent-soft);}
+.btn-sm{padding:6px 10px;font-size:12px;}
+.hint{font-size:11px;color:var(--ink-soft);margin-top:4px;}
+
 .loading{padding:60px 0;text-align:center;color:var(--ink-soft);font-size:14px;}
 .config-warning{background:#FBEAE6;border:1px solid var(--danger);color:var(--danger);padding:14px 18px;border-radius:12px;margin-bottom:20px;font-size:13px;}

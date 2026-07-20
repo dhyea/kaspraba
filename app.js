@@ -19,6 +19,8 @@ let currentPeriod = localStorage.getItem('kas_period') || todayPeriod();
 let USER_NAME = localStorage.getItem('kas_user') || 'Suami';
 let activeTab = 'anggaran';
 let realtimeConnected = false;
+let editingTxId = null;
+let txCatManuallyChanged = false;
 
 let STATE = { income: [], categories: [], transactions: [], emergencyFund: [] };
 
@@ -44,6 +46,33 @@ function totalBudget(){ return STATE.categories.reduce((s,c)=>s+Number(c.budget|
 function totalSpent(){ return STATE.transactions.reduce((s,t)=>s+Number(t.amount||0),0); }
 function spentByCategory(catName){ return STATE.transactions.filter(t=>t.category===catName).reduce((s,t)=>s+Number(t.amount||0),0); }
 function totalEmergencyFund(){ return STATE.emergencyFund.reduce((s,e)=>s+Number(e.amount||0),0); }
+
+// Tebak kategori dari kata kunci di keterangan transaksi.
+// Bisa selalu diganti manual oleh user — ini cuma bantuan awal.
+const CATEGORY_KEYWORDS = {
+  'listrik':'Listrik, Air, Gas', 'token':'Listrik, Air, Gas', 'pln':'Listrik, Air, Gas',
+  'pdam':'Listrik, Air, Gas', 'air':'Listrik, Air, Gas', 'gas':'Listrik, Air, Gas',
+  'sekolah':'Pendidikan Anak', 'spp':'Pendidikan Anak', 'buku':'Pendidikan Anak', 'les':'Pendidikan Anak',
+  'dokter':'Kesehatan', 'obat':'Kesehatan', 'apotek':'Kesehatan', 'bpjs':'Kesehatan', 'rumah sakit':'Kesehatan',
+  'bensin':'Transportasi', 'parkir':'Transportasi', 'tol':'Transportasi', 'ojek':'Transportasi', 'gojek':'Transportasi', 'grab':'Transportasi',
+  'nonton':'Hiburan/Lain-lain', 'bioskop':'Hiburan/Lain-lain', 'langganan':'Hiburan/Lain-lain',
+  'belanja':'Belanja Dapur/Sembako', 'pasar':'Belanja Dapur/Sembako', 'sayur':'Belanja Dapur/Sembako', 'sembako':'Belanja Dapur/Sembako', 'dapur':'Belanja Dapur/Sembako',
+  'cicilan':'Cicilan/Tagihan', 'kredit':'Cicilan/Tagihan', 'tagihan':'Cicilan/Tagihan', 'angsuran':'Cicilan/Tagihan',
+};
+function suggestCategory(desc){
+  if(!desc) return '';
+  const text = desc.toLowerCase();
+  const catNames = new Set(STATE.categories.map(c=>c.name));
+  for(const key in CATEGORY_KEYWORDS){
+    if(text.includes(key) && catNames.has(CATEGORY_KEYWORDS[key])) return CATEGORY_KEYWORDS[key];
+  }
+  // fallback: cek apakah nama kategori itu sendiri disebut di keterangan
+  const direct = STATE.categories.find(c=>{
+    const key = c.name.toLowerCase().split(/[\/,]/)[0].trim();
+    return key.length>2 && text.includes(key);
+  });
+  return direct ? direct.name : '';
+}
 
 // ---------------- DATA LOADING ----------------
 async function loadPeriodData(){
@@ -192,11 +221,13 @@ function render(){
       <button class="tab-btn ${activeTab==='anggaran'?'active':''}" data-tab="anggaran">Amplop Anggaran</button>
       <button class="tab-btn ${activeTab==='transaksi'?'active':''}" data-tab="transaksi">Catatan Transaksi</button>
       <button class="tab-btn ${activeTab==='darurat'?'active':''}" data-tab="darurat">Dana Darurat</button>
+      <button class="tab-btn ${activeTab==='rekap'?'active':''}" data-tab="rekap">Rekap Pengeluaran</button>
     </div>
 
     <div id="panel-anggaran" class="tab-panel ${activeTab==='anggaran'?'active':''}"></div>
     <div id="panel-transaksi" class="tab-panel ${activeTab==='transaksi'?'active':''}"></div>
     <div id="panel-darurat" class="tab-panel ${activeTab==='darurat'?'active':''}"></div>
+    <div id="panel-rekap" class="tab-panel ${activeTab==='rekap'?'active':''}"></div>
   `;
 
   updateStatusBadge();
@@ -222,6 +253,7 @@ function render(){
   renderAnggaran();
   renderTransaksi();
   renderDarurat();
+  renderRekap();
 }
 
 function renderAnggaran(){
@@ -329,8 +361,12 @@ function renderTransaksi(){
     <div class="form-card">
       <div class="form-grid">
         <div class="field"><label>Tanggal</label><input type="date" id="txDate" value="${todayStr()}"></div>
-        <div class="field"><label>Keterangan</label><input type="text" id="txDesc" placeholder="Beli sayur, dll"></div>
-        <div class="field"><label>Kategori</label><select id="txCat">${catOptions || '<option value="">Belum ada kategori</option>'}</select></div>
+        <div class="field"><label>Keterangan</label><input type="text" id="txDesc" placeholder="Beli sayur, token listrik, dll"></div>
+        <div class="field">
+          <label>Kategori</label>
+          <select id="txCat">${catOptions || '<option value="">Belum ada kategori</option>'}</select>
+          <div class="hint">Terisi otomatis dari keterangan, bisa diganti manual.</div>
+        </div>
         <div class="field"><label>Jumlah (Rp)</label><input type="number" id="txAmount" min="0" placeholder="0"></div>
         <button class="btn-primary" id="txAddBtn">+ Simpan</button>
       </div>
@@ -339,19 +375,22 @@ function renderTransaksi(){
     <table>
       <thead><tr><th>Tanggal</th><th>Keterangan</th><th>Kategori</th><th>Oleh</th><th style="text-align:right">Jumlah</th><th></th></tr></thead>
       <tbody>
-        ${rows.map(t=>`
-          <tr>
-            <td>${t.tx_date}</td>
-            <td>${t.description||'-'}</td>
-            <td><span class="cat-tag">${t.category}</span></td>
-            <td class="who">${t.by_user||'-'}</td>
-            <td class="amount">${formatRp(t.amount)}</td>
-            <td><button class="del-row" data-del-tx="${t.id}">✕</button></td>
-          </tr>`).join('')}
+        ${rows.map(t=> t.id===editingTxId ? txEditRowHtml(t) : txRowHtml(t)).join('')}
       </tbody>
     </table>
     ${rows.length===0 ? '<div class="empty">Belum ada transaksi bulan ini.</div>' : ''}
   `;
+
+  // auto-saran kategori berdasarkan keterangan yang diketik
+  txCatManuallyChanged = false;
+  const txDescEl = document.getElementById('txDesc');
+  const txCatEl = document.getElementById('txCat');
+  txCatEl.addEventListener('change', ()=>{ txCatManuallyChanged = true; });
+  txDescEl.addEventListener('input', ()=>{
+    if(txCatManuallyChanged) return;
+    const suggestion = suggestCategory(txDescEl.value);
+    if(suggestion) txCatEl.value = suggestion;
+  });
 
   document.getElementById('txAddBtn').addEventListener('click', async ()=>{
     const date = document.getElementById('txDate').value || todayStr();
@@ -361,14 +400,75 @@ function renderTransaksi(){
     if(!category){ alert('Buat kategori dulu di tab Amplop Anggaran.'); return; }
     if(amount<=0){ alert('Isi jumlah pengeluaran terlebih dahulu.'); return; }
     await supabaseClient.from('transactions').insert({period: currentPeriod, tx_date:date, description, category, amount, by_user:USER_NAME});
-    await loadPeriodData(); render(); activeTab='transaksi'; render();
+    activeTab='transaksi'; await loadPeriodData(); render();
   });
   panel.querySelectorAll('[data-del-tx]').forEach(btn=>{
     btn.addEventListener('click', async e=>{
       await supabaseClient.from('transactions').delete().eq('id', e.target.dataset.delTx);
-      await loadPeriodData(); render(); activeTab='transaksi'; render();
+      activeTab='transaksi'; await loadPeriodData(); render();
     });
   });
+  panel.querySelectorAll('[data-edit-tx]').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      editingTxId = e.target.dataset.editTx;
+      activeTab='transaksi'; render();
+    });
+  });
+  panel.querySelectorAll('[data-cancel-tx]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      editingTxId = null;
+      activeTab='transaksi'; render();
+    });
+  });
+  panel.querySelectorAll('[data-save-tx]').forEach(btn=>{
+    btn.addEventListener('click', async e=>{
+      const id = e.target.dataset.saveTx;
+      const date = document.getElementById(`editDate-${id}`).value;
+      const description = document.getElementById(`editDesc-${id}`).value.trim();
+      const category = document.getElementById(`editCat-${id}`).value;
+      const amount = Number(document.getElementById(`editAmount-${id}`).value)||0;
+      if(!date){ alert('Tanggal harus diisi.'); return; }
+      if(amount<=0){ alert('Jumlah harus lebih dari 0.'); return; }
+      await supabaseClient.from('transactions').update({tx_date:date, description, category, amount}).eq('id', id);
+      editingTxId = null;
+      activeTab='transaksi'; await loadPeriodData(); render();
+    });
+  });
+}
+
+function txRowHtml(t){
+  return `
+    <tr>
+      <td>${t.tx_date}</td>
+      <td>${t.description||'-'}</td>
+      <td><span class="cat-tag">${t.category}</span></td>
+      <td class="who">${t.by_user||'-'}</td>
+      <td class="amount">${formatRp(t.amount)}</td>
+      <td>
+        <div class="row-actions">
+          <button class="del-row" data-edit-tx="${t.id}" title="Edit">✎</button>
+          <button class="del-row" data-del-tx="${t.id}" title="Hapus">✕</button>
+        </div>
+      </td>
+    </tr>`;
+}
+
+function txEditRowHtml(t){
+  const catOptions = STATE.categories.map(c=>`<option value="${c.name}" ${c.name===t.category?'selected':''}>${c.name}</option>`).join('');
+  return `
+    <tr class="editing-row">
+      <td><input type="date" class="edit-input" id="editDate-${t.id}" value="${t.tx_date}"></td>
+      <td><input type="text" class="edit-input" id="editDesc-${t.id}" value="${t.description||''}"></td>
+      <td><select class="edit-input" id="editCat-${t.id}">${catOptions}</select></td>
+      <td class="who">${t.by_user||'-'}</td>
+      <td class="amount"><input type="number" class="edit-input amount-input" id="editAmount-${t.id}" value="${t.amount}"></td>
+      <td>
+        <div class="row-actions">
+          <button class="btn-primary btn-sm" data-save-tx="${t.id}">Simpan</button>
+          <button class="del-row" data-cancel-tx="${t.id}" title="Batal">✕</button>
+        </div>
+      </td>
+    </tr>`;
 }
 
 function renderDarurat(){
@@ -427,6 +527,66 @@ function renderDarurat(){
       await loadEmergencyFund(); render(); activeTab='darurat'; render();
     });
   });
+}
+
+function renderRekap(){
+  const panel = document.getElementById('panel-rekap');
+  const spent = totalSpent();
+
+  // rekap per kategori
+  const byCat = STATE.categories.map(c=>({name:c.name, budget:Number(c.budget||0), spent:spentByCategory(c.name)}));
+  const knownNames = new Set(STATE.categories.map(c=>c.name));
+  const otherSpent = STATE.transactions.filter(t=>!knownNames.has(t.category)).reduce((s,t)=>s+Number(t.amount||0),0);
+  if(otherSpent>0) byCat.push({name:'(Kategori sudah dihapus)', budget:0, spent:otherSpent});
+  byCat.sort((a,b)=>b.spent-a.spent);
+
+  const catRowsHtml = byCat.map(c=>{
+    const pct = spent>0 ? (c.spent/spent*100) : 0;
+    return `
+      <tr>
+        <td>${c.name}</td>
+        <td class="amount">${formatRp(c.spent)}</td>
+        <td class="amount">${pct.toFixed(1)}%</td>
+        <td style="min-width:140px;"><div class="bar-track" style="margin:0;"><div class="bar-fill" style="width:${pct}%"></div></div></td>
+      </tr>`;
+  }).join('');
+
+  // rekap per pencatat (suami/istri)
+  const byUser = {};
+  STATE.transactions.forEach(t=>{
+    const u = t.by_user || 'Tidak diketahui';
+    byUser[u] = (byUser[u]||0) + Number(t.amount||0);
+  });
+  const userEntries = Object.entries(byUser).sort((a,b)=>b[1]-a[1]);
+  const userRowsHtml = userEntries.map(([u,amt])=>{
+    const pct = spent>0 ? (amt/spent*100) : 0;
+    return `<tr><td>${u}</td><td class="amount">${formatRp(amt)}</td><td class="amount">${pct.toFixed(1)}%</td></tr>`;
+  }).join('');
+
+  const avgPerTx = STATE.transactions.length ? spent/STATE.transactions.length : 0;
+
+  panel.innerHTML = `
+    <h2 class="section-title">Rekap Pengeluaran — ${periodLabel(currentPeriod)}</h2>
+    <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
+      <div class="stat"><div class="label">Total Pengeluaran</div><div class="value">${formatRp(spent)}</div></div>
+      <div class="stat"><div class="label">Jumlah Transaksi</div><div class="value">${STATE.transactions.length}</div></div>
+      <div class="stat"><div class="label">Rata-rata / Transaksi</div><div class="value">${formatRp(avgPerTx)}</div></div>
+    </div>
+
+    <h2 class="section-title">Per Kategori</h2>
+    <table>
+      <thead><tr><th>Kategori</th><th style="text-align:right">Jumlah</th><th style="text-align:right">% dari Total</th><th>Proporsi</th></tr></thead>
+      <tbody>${catRowsHtml}</tbody>
+    </table>
+    ${byCat.length===0 ? '<div class="empty">Belum ada pengeluaran bulan ini.</div>' : ''}
+
+    <h2 class="section-title" style="margin-top:24px;">Per Pencatat</h2>
+    <table>
+      <thead><tr><th>Dicatat oleh</th><th style="text-align:right">Jumlah</th><th style="text-align:right">% dari Total</th></tr></thead>
+      <tbody>${userRowsHtml}</tbody>
+    </table>
+    ${userEntries.length===0 ? '<div class="empty">Belum ada transaksi bulan ini.</div>' : ''}
+  `;
 }
 
 init();
